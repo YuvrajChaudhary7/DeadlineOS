@@ -1,0 +1,10 @@
+CREATE INDEX ix_courses_staff ON courses(staff_id);
+CREATE INDEX ix_enrollments_course_status ON enrollments(course_id,status);
+CREATE INDEX ix_deadlines_course_due ON deadlines(course_id,due_at) WHERE is_active;
+CREATE INDEX ix_submissions_deadline_status ON submissions(deadline_id,status);
+CREATE INDEX ix_submissions_student ON submissions(user_id,submitted_at DESC);
+CREATE INDEX ix_notifications_unread ON notifications(user_id,created_at DESC) WHERE NOT is_read;
+CREATE INDEX ix_activity_recent ON activity_logs(occurred_at DESC);
+CREATE INDEX ix_personal_tasks_due ON personal_tasks(user_id,is_complete,due_at);
+CREATE INDEX ix_announcements_course_recent ON announcements(course_id,created_at DESC);
+CREATE INDEX ix_task_subtasks_task ON task_subtasks(task_id);

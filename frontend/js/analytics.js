@@ -1,0 +1,13 @@
+async function loadAnalytics(){
+  try{
+    const {courses}=await api('/analytics/overview');const deadlines=courses.flatMap(course=>course.deadlines);const enrolled=courses.reduce((sum,course)=>sum+course.enrolled,0);const submissions=deadlines.reduce((sum,deadline)=>sum+deadline.submitted,0);const late=deadlines.reduce((sum,deadline)=>sum+deadline.late,0);
+    const cards=[['Courses',courses.length],['Course enrollments',enrolled],['Submissions',submissions],['Late work',late]];document.querySelector('#analytics-summary').replaceChildren(...cards.map(([label,value])=>{const card=document.createElement('article');card.className='summary-card';const number=document.createElement('strong');number.textContent=value;const caption=document.createElement('span');caption.textContent=label;card.append(number,caption);return card}));
+    const host=document.querySelector('#analytics-courses');if(!courses.length){host.innerHTML='<div class="empty-state"><h3>No courses yet</h3><p>Create a course and assignments to see analytics.</p></div>';return}
+    host.replaceChildren(...courses.map(course=>{const section=document.createElement('section');section.className='panel analytics-course';const heading=document.createElement('div');heading.className='card-topline';const title=document.createElement('h2');title.textContent=`${course.code} · ${course.name}`;const count=document.createElement('span');count.className='soft-badge';count.textContent=`${course.enrolled} enrolled`;heading.append(title,count);section.append(heading);
+      if(!course.deadlines.length){const empty=document.createElement('p');empty.textContent='No assignments published yet.';section.append(empty);return section}
+      const table=document.createElement('div');table.className='analytics-table';const header=document.createElement('div');header.className='analytics-row analytics-header';['Assignment','Submitted','Late','Rate','Avg. grade'].forEach(label=>{const cell=document.createElement('span');cell.textContent=label;header.append(cell)});table.append(header);
+      for(const deadline of course.deadlines){const row=document.createElement('div');row.className='analytics-row';const values=[deadline.title,`${deadline.submitted}/${deadline.enrolled}`,deadline.late,`${deadline.submission_rate}%`,deadline.average_mark==null?'—':`${deadline.average_mark}/${deadline.max_marks}`];values.forEach(value=>{const cell=document.createElement('span');cell.textContent=value;row.append(cell)});table.append(row)}section.append(table);return section;
+    }));
+  }catch(error){showMessage(error.message)}
+}
+loadAnalytics();
