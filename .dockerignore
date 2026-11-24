@@ -1,0 +1,16 @@
+.git
+.github
+.venv
+venv
+__pycache__
+*.py[cod]
+*.db
+.env
+instance
+uploads
+backend/*.c
+backend/*.exe
+backend/__pycache__
+tests
+docs
+azure

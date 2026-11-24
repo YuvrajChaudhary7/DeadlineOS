@@ -18,6 +18,14 @@ class User(db.Model):
     is_active = db.Column(db.Boolean, nullable=False, default=True)
 
 
+class AuthFailure(db.Model):
+    __tablename__ = "auth_failures"
+    id = db.Column(db.Integer, primary_key=True)
+    ip_hash = db.Column(db.String(64), nullable=False, index=True)
+    email_hash = db.Column(db.String(64), nullable=False, index=True)
+    occurred_at = db.Column(db.DateTime(timezone=True), nullable=False, default=utcnow, index=True)
+
+
 class Course(db.Model):
     __tablename__ = "courses"
     id = db.Column(db.Integer, primary_key=True)
@@ -49,8 +57,13 @@ class Deadline(db.Model):
     max_marks = db.Column(db.Integer, nullable=False)
     created_by = db.Column(db.Integer, db.ForeignKey("users.id", ondelete="RESTRICT"), nullable=False)
     is_active = db.Column(db.Boolean, nullable=False, default=True)
+    allow_resubmissions = db.Column(db.Boolean, nullable=False, default=False)
+    max_attempts = db.Column(db.Integer, nullable=False, default=1)
     created_at = db.Column(db.DateTime(timezone=True), nullable=False, default=utcnow)
-    __table_args__ = (db.CheckConstraint("max_marks > 0", name="ck_deadline_positive_marks"),)
+    __table_args__ = (
+        db.CheckConstraint("max_marks > 0", name="ck_deadline_positive_marks"),
+        db.CheckConstraint("((allow_resubmissions AND max_attempts >= 2 AND max_attempts <= 10) OR (NOT allow_resubmissions AND max_attempts = 1))", name="ck_deadline_resubmission_policy"),
+    )
 
 
 class Submission(db.Model):
@@ -66,6 +79,8 @@ class Submission(db.Model):
     marks_obtained = db.Column(db.Integer)
     feedback = db.Column(db.Text)
     graded_by = db.Column(db.Integer, db.ForeignKey("users.id", ondelete="SET NULL"))
+    attempt_count = db.Column(db.Integer, nullable=False, default=1)
+    file_size_bytes = db.Column(db.Integer, nullable=False, default=0)
     __table_args__ = (db.UniqueConstraint("deadline_id", "user_id", name="uq_submission_deadline_user"), db.CheckConstraint("marks_obtained IS NULL OR marks_obtained >= 0", name="ck_submission_nonnegative_marks"))
 
 
@@ -90,6 +105,8 @@ class PersonalTask(db.Model):
     priority = db.Column(db.String(10), nullable=False, default="medium")
     recurrence = db.Column(db.String(10), nullable=False, default="none")
     is_complete = db.Column(db.Boolean, nullable=False, default=False)
+    is_archived = db.Column(db.Boolean, nullable=False, default=False)
+    project_id = db.Column(db.Integer, db.ForeignKey("projects.id", ondelete="SET NULL"), index=True)
     created_at = db.Column(db.DateTime(timezone=True), nullable=False, default=utcnow)
     __table_args__ = (db.CheckConstraint("priority IN ('low','medium','high')", name="ck_personal_task_priority"), db.CheckConstraint("recurrence IN ('none','weekly','monthly')", name="ck_personal_task_recurrence"))
 
@@ -101,6 +118,59 @@ class TaskSubtask(db.Model):
     title = db.Column(db.String(160), nullable=False)
     is_complete = db.Column(db.Boolean, nullable=False, default=False)
     created_at = db.Column(db.DateTime(timezone=True), nullable=False, default=utcnow)
+
+
+class Project(db.Model):
+    __tablename__ = "projects"
+    id = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(db.Integer, db.ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+    name = db.Column(db.String(120), nullable=False)
+    description = db.Column(db.String(2000))
+    color = db.Column(db.String(7), nullable=False, default="#167354")
+    is_archived = db.Column(db.Boolean, nullable=False, default=False)
+    created_at = db.Column(db.DateTime(timezone=True), nullable=False, default=utcnow)
+
+
+class ProjectFile(db.Model):
+    __tablename__ = "project_files"
+    id = db.Column(db.Integer, primary_key=True)
+    project_id = db.Column(db.Integer, db.ForeignKey("projects.id", ondelete="CASCADE"), nullable=False, index=True)
+    file_key = db.Column(db.String(255), nullable=False, unique=True)
+    file_name = db.Column(db.String(255), nullable=False)
+    size_bytes = db.Column(db.Integer, nullable=False, default=0)
+    uploaded_at = db.Column(db.DateTime(timezone=True), nullable=False, default=utcnow)
+
+
+class ProjectDeadline(db.Model):
+    __tablename__ = "project_deadlines"
+    id = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(db.Integer, db.ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+    project_id = db.Column(db.Integer, db.ForeignKey("projects.id", ondelete="CASCADE"), nullable=False, index=True)
+    deadline_id = db.Column(db.Integer, db.ForeignKey("deadlines.id", ondelete="CASCADE"), nullable=False, index=True)
+    __table_args__ = (db.UniqueConstraint("user_id", "project_id", "deadline_id", name="uq_project_deadline"),)
+
+
+class SubmissionAttempt(db.Model):
+    __tablename__ = "submission_attempts"
+    id = db.Column(db.Integer, primary_key=True)
+    submission_id = db.Column(db.Integer, db.ForeignKey("submissions.id", ondelete="CASCADE"), nullable=False, index=True)
+    attempt_number = db.Column(db.Integer, nullable=False)
+    submitted_at = db.Column(db.DateTime(timezone=True), nullable=False, default=utcnow)
+    note = db.Column(db.Text)
+    file_key = db.Column(db.String(255))
+    file_name = db.Column(db.String(255))
+    file_size_bytes = db.Column(db.Integer, nullable=False, default=0)
+    status = db.Column(db.String(12), nullable=False)
+    __table_args__ = (db.UniqueConstraint("submission_id", "attempt_number", name="uq_submission_attempt"), db.CheckConstraint("attempt_number > 0", name="ck_submission_attempt_positive"))
+
+
+class TaskCompletion(db.Model):
+    __tablename__ = "task_completions"
+    id = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(db.Integer, db.ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+    task_id = db.Column(db.Integer, db.ForeignKey("personal_tasks.id", ondelete="CASCADE"), nullable=False, index=True)
+    completed_at = db.Column(db.DateTime(timezone=True), nullable=False, default=utcnow)
+    __table_args__ = (db.UniqueConstraint("task_id", name="uq_task_completion_event"),)
 
 
 class Announcement(db.Model):
