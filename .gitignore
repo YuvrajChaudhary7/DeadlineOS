@@ -6,4 +6,5 @@ __pycache__/
 instance/
 *.db
 uploads/
+backups/
 .pytest_cache/

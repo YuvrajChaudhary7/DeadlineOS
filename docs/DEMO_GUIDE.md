@@ -3,12 +3,18 @@
 1. Start with `run.bat`; visit `/` and `/api/health`. Explain SQLite is the local setup option.
 2. Sign in as staff and create a course from **Courses**, then publish an assignment from **Deadlines**.
 3. Sign in as student, join that course, and view its deadlines; point out that unjoined courses do not expose assignments.
-4. Open **My Tasks** as the student, add a personal project deadline, set its priority, and mark it complete. Explain how personal tasks remain separate from instructor assignments.
-5. Create a recurring task and add checklist subtasks; complete it and show the next occurrence.
-6. Submit a file and note; explain server timestamps, late calculation, private download authorization and unique `(deadline,user)` protection.
-7. Sign back in as staff, review the submission list, download work, grade within maximum marks, then show the student notification and feedback.
-8. Post a course announcement and show the student inbox update. Review staff analytics and activity history.
-9. Show the combined calendar, the due-soon reminder in Inbox (for an item due within 24 hours), and the admin staff account page. Bootstrap an admin with `python backend/manage.py create-admin` if one is not already provisioned.
-10. Show schema, join query, views, indexes and PostgreSQL procedure/trigger examples. Explain local ORM creates SQLite schema. Present architecture, STRIDE and DP-900 data mapping; point out cloud controls still to configure.
+4. Open **Projects**, create a private workspace, attach a reference file, link an enrolled course deadline, then open **My Tasks** from that project.
+5. Add a task with Quick Capture (for example `Finish lab report tomorrow 5pm #high`), add subtasks, select weekly recurrence, and complete one occurrence. Explain the deterministic parser, recurrence rule and ownership boundary.
+6. Create four open items on one day to demonstrate a busy heatmap cell and workload suggestion. Show task risk reasons and the daily briefing. Use the reschedule action and explain that instructor deadlines are never auto-moved.
+7. Archive a completed task and restore it from **Archive**. Show the private streak summary and explain that completion events prevent counting the same task repeatedly.
+8. Submit a file and note; explain server timestamps, late calculation, private download authorization and unique `(deadline,user)` current submission protection.
+9. Sign back in as staff, edit a deadline, configure a limited number of resubmissions, close it and reopen it from the **Closed** filter, review submission attempt history, download work and grade within maximum marks. Then show student feedback.
+10. Post a course announcement and show the student inbox update. Review staff analytics and activity history.
+11. Show the due-soon reminder in Inbox (for an item due within 24 hours), and admin staff-account page. Bootstrap an admin with `python backend/manage.py create-admin` if one is not already provisioned.
+12. Show schema, constraints, indexes, workload query, views and PostgreSQL procedure/trigger examples. Explain local ORM creates SQLite schema. Present architecture, STRIDE and DP-900 data mapping; distinguish local behavior from Azure target controls.
+13. Run `python scripts/clean_install_check.py` to show a disposable clean install and `python -m unittest discover -s tests -v` to show verified API flows. This uses a temporary SQLite file and does not reset the team's normal database. Refer to `docs/evaluation/EVIDENCE_PACK.md` for the evidence checklist.
+14. If Azure resources are configured, trigger the protected `Deploy Azure Container App` workflow from GitHub Actions on `main`, then show its HTTPS health check. Run the backup/restore round trip locally against a temporary SQLite database; do not restore over real student data during the presentation.
 
-Capture real screenshots and query output after running the demo. Local uploads are stored under Flask's instance directory; production should replace this with private Blob Storage. No cloud resources are provisioned.
+API list routes accept optional `?page=1&per_page=25`, report page details in `X-Pagination`, and cap the page size at 100. Local uploads are validated and governed by per-file and per-user quotas. Optional Compose malware scanning can be enabled by setting `CLAMAV_HOST=clamav` and `CLAMAV_REQUIRED=true` in `.env`, then running `docker compose --profile security up --build`; first startup may take time while ClamAV downloads signatures. No cloud resources are provisioned.
+
+Capture real screenshots and query output after running the demo. Run the API checks with `.\.venv\Scripts\python.exe -m unittest discover -s tests -v` on Windows or `python -m unittest discover -s tests -v` elsewhere. Demo seeding is enabled by default only when the local DB is empty; set `SEED_DEMO=false` for a clean non-demo run. Local uploads are stored under Flask's instance directory; production should replace this with private Blob Storage and malware scanning. No cloud resources are provisioned. Task risk is a heuristic, workload guidance is advisory, and streaks are private; do not describe these as predictive or clinical measures.

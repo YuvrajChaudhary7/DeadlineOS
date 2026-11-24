@@ -1,2 +1,28 @@
-async function loadNotifications(){const host=document.querySelector('#notification-list');try{const rows=await api('/notifications');if(!rows.length){host.innerHTML='<div class="empty-state"><span>✦</span><h3>All caught up</h3><p>New assignment and grading updates will appear here.</p></div>';return}host.replaceChildren(...rows.map(row=>{const card=document.createElement('article');card.className=`submission-card notification-card ${row.is_read?'read':''}`;const head=document.createElement('div');head.className='card-topline';const message=document.createElement('strong');message.textContent=row.message;const badge=document.createElement('span');badge.className='soft-badge';badge.textContent=row.kind;head.append(message,badge);const date=document.createElement('p');date.className='submission-detail';date.textContent=new Date(row.created_at).toLocaleString();card.append(head,date);if(!row.is_read){const button=document.createElement('button');button.className='button button-small';button.textContent='Mark as read';button.onclick=async()=>{try{await api(`/notifications/${row.id}/read`,{method:'PUT'});await loadNotifications()}catch(error){showMessage(error.message)}};card.append(button)}return card}))}catch(error){showMessage(error.message)}}
+let notificationPage = 1;
+
+async function loadNotifications() {
+  const host = document.querySelector('#notification-list');
+  try {
+    const rows = await api(`/notifications?page=${notificationPage}&per_page=25`);
+    renderPagination(host, rows, page => { notificationPage = page; loadNotifications(); });
+    if (!rows.length) {
+      host.innerHTML = '<div class="empty-state"><span>✦</span><h3>All caught up</h3><p>New assignment and grading updates will appear here.</p></div>';
+      return;
+    }
+    host.replaceChildren(...rows.map(row => {
+      const card = document.createElement('article'); card.className = `submission-card notification-card ${row.is_read ? 'read' : ''}`;
+      const head = document.createElement('div'); head.className = 'card-topline';
+      const message = document.createElement('strong'); message.textContent = row.message;
+      const badge = document.createElement('span'); badge.className = 'soft-badge'; badge.textContent = row.kind; head.append(message, badge);
+      const date = document.createElement('p'); date.className = 'submission-detail'; date.textContent = new Date(row.created_at).toLocaleString(); card.append(head, date);
+      if (!row.is_read) {
+        const button = document.createElement('button'); button.className = 'button button-small'; button.textContent = 'Mark as read';
+        button.onclick = async () => { try { await api(`/notifications/${row.id}/read`, { method: 'PUT' }); await loadNotifications(); } catch (error) { showMessage(error.message); } };
+        card.append(button);
+      }
+      return card;
+    }));
+  } catch (error) { showMessage(error.message); }
+}
+
 loadNotifications();

@@ -2,8 +2,9 @@ FROM python:3.12-slim
 ENV PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1 PORT=5000
 WORKDIR /app
 COPY backend/requirements.txt ./requirements.txt
-RUN pip install --no-cache-dir -r requirements.txt && pip install --no-cache-dir 'psycopg[binary]>=3.2'
+RUN pip install --no-cache-dir -r requirements.txt 'gunicorn>=22,<24'
 COPY backend ./backend
+COPY frontend ./frontend
 WORKDIR /app/backend
 EXPOSE 5000
-CMD ["python", "app.py"]
+CMD ["sh", "-c", "gunicorn --bind 0.0.0.0:${PORT:-5000} --workers 1 --threads 4 --timeout 120 wsgi:app"]

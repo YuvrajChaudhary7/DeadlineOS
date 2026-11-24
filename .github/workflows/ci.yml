@@ -1,0 +1,59 @@
+name: CI
+
+on:
+  push:
+    branches: [main, "feature/**", "fix/**"]
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - database: SQLite
+            test_database_url: sqlite://
+          - database: PostgreSQL
+            test_database_url: postgresql+psycopg://deadlineos:deadlineos@localhost:5432/deadlineos
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_DB: deadlineos
+          POSTGRES_USER: deadlineos
+          POSTGRES_PASSWORD: deadlineos
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U deadlineos -d deadlineos"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 10
+    env:
+      TEST_DATABASE_URL: ${{ matrix.test_database_url }}
+      JWT_SECRET_KEY: ci-only-not-for-deployment
+      SEED_DEMO: "false"
+      ENABLE_REMINDERS: "false"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: backend/requirements.txt
+      - name: Install dependencies
+        run: python -m pip install -r backend/requirements.txt
+      - name: Run API integration tests (${{ matrix.database }})
+        run: python -m unittest discover -s tests -v
+      - name: Rehearse clean install
+        run: python scripts/clean_install_check.py
+      - name: Check Python syntax
+        run: python -m compileall -q backend tests scripts
+      - name: Build deployable container image
+        run: docker build --tag deadlineos:ci .
+

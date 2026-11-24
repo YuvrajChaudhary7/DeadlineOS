@@ -8,3 +8,8 @@ CREATE INDEX ix_activity_recent ON activity_logs(occurred_at DESC);
 CREATE INDEX ix_personal_tasks_due ON personal_tasks(user_id,is_complete,due_at);
 CREATE INDEX ix_announcements_course_recent ON announcements(course_id,created_at DESC);
 CREATE INDEX ix_task_subtasks_task ON task_subtasks(task_id);
+CREATE INDEX ix_projects_owner_active ON projects(user_id,created_at DESC) WHERE NOT is_archived;
+CREATE INDEX ix_project_files_project_recent ON project_files(project_id,uploaded_at DESC);
+CREATE INDEX ix_project_deadlines_owner ON project_deadlines(user_id,project_id);
+CREATE INDEX ix_task_completion_user_day ON task_completions(user_id,completed_at DESC);
+CREATE INDEX ix_submission_attempt_history ON submission_attempts(submission_id,attempt_number DESC);

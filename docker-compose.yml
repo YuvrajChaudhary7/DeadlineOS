@@ -7,6 +7,11 @@ services:
     environment:
       HOST: 0.0.0.0
       DATABASE_URL: postgresql+psycopg://deadlineos:${POSTGRES_PASSWORD}@db:5432/deadlineos
+      MAX_USER_STORAGE_BYTES: ${MAX_USER_STORAGE_BYTES:-209715200}
+      MAX_USER_FILES: ${MAX_USER_FILES:-100}
+      CLAMAV_HOST: ${CLAMAV_HOST:-}
+      CLAMAV_PORT: ${CLAMAV_PORT:-3310}
+      CLAMAV_REQUIRED: ${CLAMAV_REQUIRED:-false}
     depends_on:
       db:
         condition: service_healthy
@@ -23,6 +28,11 @@ services:
       interval: 5s
       timeout: 3s
       retries: 10
+    restart: unless-stopped
+  clamav:
+    image: clamav/clamav:stable
+    profiles: ["security"]
+    expose: ["3310"]
     restart: unless-stopped
 volumes:
   postgres_data:
