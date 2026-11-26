@@ -36,4 +36,4 @@ GitHub Actions uses Azure OIDC, so the workflow does not need a long-lived Azure
 
 ## Current deployment boundary
 
-This repository prepares the workflow but does not create Azure resources or deploy them. The current machine has no Azure CLI, Docker, or authenticated GitHub CLI session, and no Azure subscription details were supplied. Do not report an Azure deployment until the workflow completes against the team's actual subscription and the hosted app has been smoke-tested. Azure services can incur charges.
+The workflow updates an existing Azure Container App; it does not create Azure resources. A hosted DeadlineOS demo is available at [the live app](https://deadlineos-app.wonderfulpond-3d54e124.centralindia.azurecontainerapps.io/). Its availability does not confirm that every optional Azure service or control described above is configured. Check the deployment workflow and active resource settings before describing those controls as enabled. Azure services can incur charges.
