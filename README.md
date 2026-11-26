@@ -18,7 +18,7 @@ To bootstrap the first administrator, run `python backend/manage.py create-admin
 
 ## Docker
 
-Copy `.env.example` to `.env`, set a strong `JWT_SECRET_KEY` and `POSTGRES_PASSWORD`, then run `docker compose up --build`. Docker Compose uses PostgreSQL. Local `run.bat` uses SQLite. SQL examples document PostgreSQL concepts.
+Copy `.env.example` to `.env`, set a strong `JWT_SECRET_KEY` and `POSTGRES_PASSWORD`, then run `docker compose up --build`. Docker Compose uses PostgreSQL. Local `run.bat` uses SQLite. SQL examples document PostgreSQL concepts. Open `http://127.0.0.1:5000/` after the containers start.
 
 ## Repository layout
 
@@ -37,7 +37,7 @@ Copy `.env.example` to `.env`, set a strong `JWT_SECRET_KEY` and `POSTGRES_PASSW
 - Cloud security: password hashing, short-lived JWT, role and ownership checks, ORM access, audit trail and threat model.
 - DP-900: data mapping plus Azure SQL, Blob, Cosmos DB and Power BI design notes in `azure/`.
 
-See `WORK_DISTRIBUTION.md` for the team plan and `docs/DEMO_GUIDE.md` for an evaluation walkthrough. Azure notes are design guidance; they do not claim cloud resources have been provisioned.
+See `WORK_DISTRIBUTION.md` for the team plan and `docs/DEMO_GUIDE.md` for an evaluation walkthrough. A hosted demo is available above. The Azure reference notes describe architecture and setup; they don't imply every documented service or control is active in the demo.
 
 For a disposable clean-install rehearsal, run `python scripts/clean_install_check.py` from the project root (or use the active virtual environment's Python). It creates a temporary SQLite database, verifies schema version 4 and the demo seed, then removes the temporary database. Existing databases are upgraded on application startup through additive, versioned migrations recorded in `schema_migrations`. Login throttling, defensive security headers, request/input limits, and actionable health/error responses are included. Run `python -m unittest discover -s tests -v` for API and backup/restore checks.
 
