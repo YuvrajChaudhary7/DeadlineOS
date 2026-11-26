@@ -2,6 +2,10 @@
 
 DeadlineOS is a student and staff deadline management app built as a two-person semester project. Students enroll in courses, see deadlines, submit work and review grades. Staff create courses and deadlines, grade submissions and review an audit trail.
 
+## Live demo
+
+[Open DeadlineOS](https://deadlineos-app.wonderfulpond-3d54e124.centralindia.azurecontainerapps.io/)
+
 ## Run locally (Windows)
 
 1. Install Python 3.10 or later.
@@ -15,6 +19,16 @@ To bootstrap the first administrator, run `python backend/manage.py create-admin
 ## Docker
 
 Copy `.env.example` to `.env`, set a strong `JWT_SECRET_KEY` and `POSTGRES_PASSWORD`, then run `docker compose up --build`. Docker Compose uses PostgreSQL. Local `run.bat` uses SQLite. SQL examples document PostgreSQL concepts.
+
+## Repository layout
+
+- backend/: Flask API, database models, authentication and admin commands.
+- frontend/: browser app, styles and client-side flows.
+- database/: relational SQL examples and query notes.
+- docs/: architecture, API, security, deployment and evaluation guides.
+- azure/: Azure storage, Cosmos DB and Power BI design notes.
+- tests/: API, database and backup/restore checks.
+- scripts/: clean-install and maintenance helpers.
 
 ## Evaluation map
 
