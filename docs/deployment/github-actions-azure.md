@@ -29,6 +29,8 @@ Configure the Container App to use its managed identity to pull from ACR. Config
    - `AZURE_RESOURCE_GROUP`
    - `AZURE_CONTAINER_APP_NAME`
 
+   To enable the upload-persistence smoke check, provision a dedicated active student account and an unarchived project for it. Add `DEPLOY_SMOKE_EMAIL` and `DEPLOY_SMOKE_PASSWORD` as environment secrets and `DEPLOY_SMOKE_PROJECT_ID` as an environment variable. The workflow uploads a small temporary text file before deployment, verifies its contents after the new revision is healthy, then deletes it. Without the project variable, this optional check is skipped.
+
 4. Protect the environment with a reviewer if available. Merge reviewed changes to `main`, then use **Actions → Deploy Azure Container App → Run workflow** and select `main`.
 5. Confirm the workflow's health check passes, open the HTTPS URL shown in the run log, and test registration/login and private file persistence after a new revision.
 

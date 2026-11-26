@@ -53,6 +53,16 @@ jobs:
           docker build --pull -t "$ACR_SERVER/deadlineos:$IMAGE_TAG" .
           docker push "$ACR_SERVER/deadlineos:$IMAGE_TAG"
           echo "IMAGE_URI=$ACR_SERVER/deadlineos:$IMAGE_TAG" >> "$GITHUB_ENV"
+      - name: Prepare upload persistence smoke check
+        id: upload_smoke
+        if: ${{ vars.DEPLOY_SMOKE_PROJECT_ID != '' }}
+        env:
+          DEADLINEOS_SMOKE_EMAIL: ${{ secrets.DEPLOY_SMOKE_EMAIL }}
+          DEADLINEOS_SMOKE_PASSWORD: ${{ secrets.DEPLOY_SMOKE_PASSWORD }}
+          SMOKE_PROJECT_ID: ${{ vars.DEPLOY_SMOKE_PROJECT_ID }}
+        run: |
+          FQDN="$(az containerapp show --name "$CONTAINER_APP" --resource-group "$RESOURCE_GROUP" --query properties.configuration.ingress.fqdn --output tsv)"
+          python scripts/deployment_smoke_check.py prepare --base-url "https://$FQDN" --project-id "$SMOKE_PROJECT_ID" --output "$GITHUB_OUTPUT"
       - name: Deploy image
         run: az containerapp update --name "$CONTAINER_APP" --resource-group "$RESOURCE_GROUP" --image "$IMAGE_URI" --output none
       - name: Check deployed health endpoint
@@ -61,4 +71,25 @@ jobs:
           set -euo pipefail
           FQDN="$(az containerapp show --name "$CONTAINER_APP" --resource-group "$RESOURCE_GROUP" --query properties.configuration.ingress.fqdn --output tsv)"
           curl --fail --silent --show-error --retry 12 --retry-delay 10 --retry-connrefused "https://$FQDN/api/health"
+      - name: Verify upload survived the new revision
+        if: ${{ vars.DEPLOY_SMOKE_PROJECT_ID != '' }}
+        env:
+          DEADLINEOS_SMOKE_EMAIL: ${{ secrets.DEPLOY_SMOKE_EMAIL }}
+          DEADLINEOS_SMOKE_PASSWORD: ${{ secrets.DEPLOY_SMOKE_PASSWORD }}
+          SMOKE_PROJECT_ID: ${{ vars.DEPLOY_SMOKE_PROJECT_ID }}
+          SMOKE_FILE_ID: ${{ steps.upload_smoke.outputs.file_id }}
+          SMOKE_SHA256: ${{ steps.upload_smoke.outputs.sha256 }}
+        run: |
+          FQDN="$(az containerapp show --name "$CONTAINER_APP" --resource-group "$RESOURCE_GROUP" --query properties.configuration.ingress.fqdn --output tsv)"
+          python scripts/deployment_smoke_check.py verify --base-url "https://$FQDN" --project-id "$SMOKE_PROJECT_ID" --file-id "$SMOKE_FILE_ID" --sha256 "$SMOKE_SHA256"
+      - name: Clean up persistence smoke upload
+        if: ${{ always() && vars.DEPLOY_SMOKE_PROJECT_ID != '' && steps.upload_smoke.outputs.file_id != '' }}
+        env:
+          DEADLINEOS_SMOKE_EMAIL: ${{ secrets.DEPLOY_SMOKE_EMAIL }}
+          DEADLINEOS_SMOKE_PASSWORD: ${{ secrets.DEPLOY_SMOKE_PASSWORD }}
+          SMOKE_PROJECT_ID: ${{ vars.DEPLOY_SMOKE_PROJECT_ID }}
+          SMOKE_FILE_ID: ${{ steps.upload_smoke.outputs.file_id }}
+        run: |
+          FQDN="$(az containerapp show --name "$CONTAINER_APP" --resource-group "$RESOURCE_GROUP" --query properties.configuration.ingress.fqdn --output tsv)"
+          python scripts/deployment_smoke_check.py cleanup --base-url "https://$FQDN" --project-id "$SMOKE_PROJECT_ID" --file-id "$SMOKE_FILE_ID"
 
