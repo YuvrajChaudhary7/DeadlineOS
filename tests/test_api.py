@@ -75,6 +75,43 @@ class DeadlineOSApiTests(unittest.TestCase):
         self.assertEqual(self.client.patch(f"/api/projects/{project_id}", headers=self.auth(another_student), json={"name": "Hijack"}).status_code, 404)
         self.assertEqual(self.client.get("/api/personal-tasks?archived=true", headers=self.auth(another_student)).get_json(), [])
 
+    def test_login_page_does_not_publish_demo_staff_password(self):
+        response = self.client.get("/login.html")
+        self.assertEqual(response.status_code, 200)
+        self.assertNotIn(b"StaffPass123!", response.data)
+
+    def test_task_due_offset_is_normalized_to_utc(self):
+        due_utc = datetime.now(timezone.utc) + timedelta(days=3)
+        local_due = due_utc.astimezone(timezone(timedelta(hours=5, minutes=30)))
+        response = self.client.post("/api/personal-tasks", headers=self.auth(self.student_token), json={
+            "title": "Timezone check", "due_at": local_due.isoformat()
+        })
+        self.assertEqual(response.status_code, 201)
+        self.assertEqual(datetime.fromisoformat(response.get_json()["due_at"]), due_utc)
+
+    def test_early_weekly_completion_advances_the_next_occurrence(self):
+        due = datetime.now(timezone.utc) + timedelta(days=5)
+        created = self.client.post("/api/personal-tasks", headers=self.auth(self.student_token), json={
+            "title": "Weekly task", "due_at": due.isoformat(), "recurrence": "weekly"
+        })
+        self.assertEqual(created.status_code, 201)
+        response = self.client.patch(f"/api/personal-tasks/{created.get_json()['id']}",
+                                     headers=self.auth(self.student_token), json={"is_complete": True})
+        self.assertEqual(response.status_code, 200)
+        tasks = self.client.get("/api/personal-tasks", headers=self.auth(self.student_token)).get_json()
+        next_task = next(task for task in tasks if task["id"] == response.get_json()["next_task_id"])
+        self.assertEqual(datetime.fromisoformat(next_task["due_at"]), due + timedelta(days=7))
+
+    def test_task_risk_uses_open_workload_for_the_due_day(self):
+        due = (datetime.now(timezone.utc) + timedelta(days=2)).isoformat()
+        for index in range(4):
+            response = self.client.post("/api/personal-tasks", headers=self.auth(self.student_token), json={
+                "title": f"Busy day task {index}", "due_at": due
+            })
+            self.assertEqual(response.status_code, 201)
+        tasks = self.client.get("/api/personal-tasks", headers=self.auth(self.student_token)).get_json()
+        self.assertTrue(all(any("4 open items fall on this day" in reason for reason in task["risk"]["reasons"]) for task in tasks))
+
     def test_instructor_resubmission_policy_records_bounded_attempt_history(self):
         staff = User(email="staff@example.edu", password_hash=generate_password_hash("StaffTestPass123!"), role="staff", first_name="Staff", last_name="User")
         db.session.add(staff)

@@ -117,7 +117,37 @@ def create_app():
         response.headers["X-Pagination"] = json.dumps(metadata)
         return response
 
-    def task_risk(task, user):
+    def build_task_risk_context(user, tasks):
+        task_ids = [task.id for task in tasks]
+        subtasks_by_task = {task_id: [] for task_id in task_ids}
+        if not task_ids:
+            return {"subtasks_by_task": subtasks_by_task, "load_by_day": {}}
+
+        for subtask in TaskSubtask.query.filter(TaskSubtask.task_id.in_(task_ids)).order_by(TaskSubtask.id).all():
+            subtasks_by_task[subtask.task_id].append(subtask)
+
+        load_by_day = {}
+        open_tasks = PersonalTask.query.filter_by(user_id=user.id, is_archived=False, is_complete=False).all()
+        for item in open_tasks:
+            day = as_utc(item.due_at).date()
+            load_by_day[day] = load_by_day.get(day, 0) + 1
+
+        course_ids = [row[0] for row in db.session.query(Enrollment.course_id).filter_by(user_id=user.id, status="active").all()]
+        if course_ids:
+            deadlines = Deadline.query.filter(Deadline.course_id.in_(course_ids), Deadline.is_active).all()
+            deadline_ids = [item.id for item in deadlines]
+            submitted_ids = set()
+            if deadline_ids:
+                submitted_ids = {row[0] for row in db.session.query(Submission.deadline_id).filter(
+                    Submission.user_id == user.id, Submission.deadline_id.in_(deadline_ids)
+                ).all()}
+            for deadline in deadlines:
+                if deadline.id not in submitted_ids:
+                    day = as_utc(deadline.due_at).date()
+                    load_by_day[day] = load_by_day.get(day, 0) + 1
+        return {"subtasks_by_task": subtasks_by_task, "load_by_day": load_by_day}
+
+    def task_risk(task, user, context):
         if task.is_complete or task.is_archived:
             return {"score": 0, "label": "complete", "reasons": ["Task is complete or archived"]}
         now = datetime.now(timezone.utc)
@@ -137,18 +167,13 @@ def create_app():
             score += 18; reasons.append("High priority")
         elif task.priority == "medium":
             score += 8
-        subtasks = TaskSubtask.query.filter_by(task_id=task.id).all()
+        subtasks = context["subtasks_by_task"].get(task.id, [])
         if subtasks:
             remaining = sum(not item.is_complete for item in subtasks)
             if remaining:
                 score += min(20, round(20 * remaining / len(subtasks)))
                 reasons.append(f"{remaining} checklist step(s) remain")
-        personal_on_day = [item for item in PersonalTask.query.filter_by(user_id=user.id, is_archived=False, is_complete=False).all()
-                           if as_utc(item.due_at).date() == due.date()]
-        enrolled_course_ids = select(Enrollment.course_id).where(Enrollment.user_id == user.id, Enrollment.status == "active")
-        deadlines_on_day = [item for item in Deadline.query.filter(Deadline.course_id.in_(enrolled_course_ids), Deadline.is_active).all()
-                            if as_utc(item.due_at).date() == due.date()]
-        same_day_load = len(personal_on_day) + len([item for item in deadlines_on_day if not Submission.query.filter_by(user_id=user.id, deadline_id=item.id).first()])
+        same_day_load = context["load_by_day"].get(due.date(), 0)
         if same_day_load >= 4:
             score += min(20, (same_day_load - 3) * 5); reasons.append(f"{same_day_load} open items fall on this day")
         return {"score": min(score, 100), "label": "at risk" if score >= 55 else "watch" if score >= 30 else "on track",
@@ -298,7 +323,7 @@ def create_app():
             if not isinstance(due_raw, str): raise ValueError
             raw_marks = data["max_marks"]
             if isinstance(raw_marks, bool) or isinstance(raw_marks, float): raise ValueError
-            due = datetime.fromisoformat(due_raw.replace("Z", "+00:00")); marks = int(raw_marks)
+            due = as_utc(datetime.fromisoformat(due_raw.replace("Z", "+00:00"))); marks = int(raw_marks)
         except (KeyError, ValueError, TypeError): return jsonify(error="due_at (ISO-8601) and integer max_marks are required"), 400
         course = db.session.get(Course, course_id)
         if not course or course.staff_id != user.id: return jsonify(error="course not found or not owned by you"), 404
@@ -345,7 +370,7 @@ def create_app():
             if len(description) > 4000: return jsonify(error="description is too long"), 400
             changes["description"] = description
         if "due_at" in data:
-            try: changes["due_at"] = datetime.fromisoformat(str(data["due_at"]).replace("Z", "+00:00"))
+            try: changes["due_at"] = as_utc(datetime.fromisoformat(str(data["due_at"]).replace("Z", "+00:00")))
             except ValueError: return jsonify(error="due_at must be ISO-8601"), 400
         if "max_marks" in data:
             try:
@@ -499,12 +524,13 @@ def create_app():
         user = current_user()
         archived = request.args.get("archived", "false").lower() == "true"
         tasks, page = list_page(PersonalTask.query.filter_by(user_id=user.id, is_archived=archived).order_by(PersonalTask.is_complete, PersonalTask.due_at))
+        risk_context = build_task_risk_context(user, tasks)
         result = []
         for task in tasks:
-            subtasks = TaskSubtask.query.filter_by(task_id=task.id).order_by(TaskSubtask.id).all()
+            subtasks = risk_context["subtasks_by_task"].get(task.id, [])
             result.append({"id": task.id, "title": task.title, "description": task.description, "due_at": as_utc(task.due_at).isoformat(),
                            "priority": task.priority, "recurrence": task.recurrence, "is_complete": task.is_complete, "is_archived": task.is_archived,
-                           "project_id": task.project_id, "risk": task_risk(task, user),
+                           "project_id": task.project_id, "risk": task_risk(task, user, risk_context),
                            "subtasks": [{"id": sub.id, "title": sub.title, "is_complete": sub.is_complete} for sub in subtasks]})
         return paginated_json(result, page) if page else jsonify(result)
 
@@ -516,7 +542,7 @@ def create_app():
         try:
             due_raw = data["due_at"]
             if not isinstance(due_raw, str): raise ValueError
-            due = datetime.fromisoformat(due_raw.replace("Z", "+00:00"))
+            due = as_utc(datetime.fromisoformat(due_raw.replace("Z", "+00:00")))
         except (KeyError, ValueError, TypeError): return jsonify(error="due_at in ISO-8601 format is required"), 400
         priority = data.get("priority", "medium")
         recurrence = data.get("recurrence", "none")
@@ -564,7 +590,7 @@ def create_app():
             changes["is_archived"] = data["is_archived"]
         if "due_at" in data:
             if not isinstance(data["due_at"], str): return jsonify(error="due_at must be ISO-8601"), 400
-            try: changes["due_at"] = datetime.fromisoformat(data["due_at"].replace("Z", "+00:00"))
+            try: changes["due_at"] = as_utc(datetime.fromisoformat(data["due_at"].replace("Z", "+00:00")))
             except ValueError: return jsonify(error="due_at must be ISO-8601"), 400
         if "is_complete" in data and not isinstance(data["is_complete"], bool): return jsonify(error="is_complete must be a boolean"), 400
         for field, value in changes.items(): setattr(task, field, value)
@@ -579,12 +605,16 @@ def create_app():
             next_due = task.due_at
             now = datetime.now(timezone.utc)
             if task.recurrence == "weekly":
+                next_due += timedelta(days=7)
                 while as_utc(next_due) <= now: next_due += timedelta(days=7)
             else:
+                def next_month(value):
+                    month = (value.month % 12) + 1
+                    year = value.year + (1 if value.month == 12 else 0)
+                    return value.replace(year=year, month=month, day=min(value.day, calendar.monthrange(year, month)[1]))
+                next_due = next_month(next_due)
                 while as_utc(next_due) <= now:
-                    month = (next_due.month % 12) + 1
-                    year = next_due.year + (1 if next_due.month == 12 else 0)
-                    next_due = next_due.replace(year=year, month=month, day=min(next_due.day, calendar.monthrange(year, month)[1]))
+                    next_due = next_month(next_due)
             next_task = PersonalTask(user_id=user.id, title=task.title, description=task.description, due_at=next_due, priority=task.priority, recurrence=task.recurrence, project_id=task.project_id)
             db.session.add(next_task)
             db.session.flush()
@@ -647,10 +677,11 @@ def create_app():
             events.append({"id": f"deadline-{deadline.id}", "title": deadline.title, "due_at": as_utc(deadline.due_at).isoformat(),
                            "kind": "course", "course_code": course.code, "is_complete": bool(submission), "status": submission.status if submission else "todo"})
         tasks = PersonalTask.query.filter_by(user_id=user.id, is_archived=False).filter(PersonalTask.due_at <= horizon).all()
+        risk_context = build_task_risk_context(user, tasks)
         for task in tasks:
             events.append({"id": f"task-{task.id}", "title": task.title, "due_at": as_utc(task.due_at).isoformat(),
                            "kind": "personal", "priority": task.priority, "project_id": task.project_id, "is_complete": task.is_complete,
-                           "status": "complete" if task.is_complete else "todo", "risk": task_risk(task, user)})
+                           "status": "complete" if task.is_complete else "todo", "risk": task_risk(task, user, risk_context)})
         events.sort(key=lambda item: item["due_at"])
         workload = {}
         for event in events:
