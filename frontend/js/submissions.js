@@ -2,6 +2,12 @@ const submissionUser = signedInUser();
 let submissionPage = 1;
 let auditPage = 1;
 
+const exportButton = document.querySelector('#export-submissions');
+if (exportButton && submissionUser?.role === 'staff') {
+  exportButton.classList.remove('hidden');
+  exportButton.addEventListener('click', async () => { exportButton.disabled = true; try { await downloadFile('/exports/submissions.csv', 'deadlineos-submissions.csv'); } catch (error) { showMessage(error.message); } finally { exportButton.disabled = false; } });
+}
+
 async function downloadFile(path, name) {
   const blob = await api(path); const url = URL.createObjectURL(blob);
   const anchor = document.createElement('a'); anchor.href = url; anchor.download = name; anchor.click();
@@ -61,9 +67,9 @@ async function loadSubmissions() {
       }
       if (submissionUser?.role === 'staff' && row.status !== 'graded') {
         const form = document.createElement('form'); form.className = 'grade-form';
-        const marks = document.createElement('input'); marks.type = 'number'; marks.min = '0'; marks.max = row.max_marks; marks.required = true; marks.placeholder = `Mark / ${row.max_marks}`;
-        const feedback = document.createElement('input'); feedback.placeholder = 'Feedback for student'; feedback.maxLength = 4000;
-        const button = document.createElement('button'); button.className = 'button button-small'; button.textContent = 'Save grade'; form.append(marks, feedback, button);
+        const marks = document.createElement('input'); marks.type = 'number'; marks.min = '0'; marks.max = row.max_marks; marks.required = true; marks.placeholder = `Mark / ${row.max_marks}`; marks.setAttribute('aria-label', `Grade for ${row.student_name || 'student'}, maximum ${row.max_marks}`);
+        const feedback = document.createElement('input'); feedback.placeholder = 'Feedback for student'; feedback.maxLength = 4000; feedback.setAttribute('aria-label', `Feedback for ${row.student_name || 'student'}`);
+        const button = document.createElement('button'); button.type = 'submit'; button.className = 'button button-small'; button.textContent = 'Save grade'; form.append(marks, feedback, button);
         form.onsubmit = async event => { event.preventDefault(); button.disabled = true; try { await api(`/submissions/${row.id}/grade`, { method: 'PUT', body: JSON.stringify({ marks_obtained: Number(marks.value), feedback: feedback.value }) }); showMessage('Grade saved and audit logged.', 'success'); await loadSubmissions(); } catch (error) { showMessage(error.message); button.disabled = false; } };
         card.append(form);
       }

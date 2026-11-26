@@ -6,8 +6,12 @@ Base URL: `http://127.0.0.1:5000/api`. JSON requests use `Content-Type: applicat
 |---|---|---|
 | POST `/auth/register` | Public | `{email,password,first_name,last_name}`; creates student; staff role returns 403 |
 | POST `/auth/login` | Public | `{email,password}`; token and profile. Repeated failures are throttled per account/IP for the configured window (default: 5 account failures / 15 minutes); returns 429 with `Retry-After` |
+| POST `/auth/password-reset/request` | Public | `{email}`; sends a generic response; requires SMTP configuration and is IP-throttled |
+| POST `/auth/password-reset/confirm` | Public | `{token,password}`; applies a password from a single-use, 30-minute recovery link |
 | GET `/auth/me` | Signed in | Current profile |
 | POST `/auth/logout` | Signed in | Records logout; client discards short-lived token |
+| GET `/account/export` | Student | Downloads a ZIP with account data JSON and available uploaded files |
+| DELETE `/account` | Student | `{password,confirmation:"DELETE"}`; permanently removes account-owned records and files |
 | GET `/courses` | Signed in | Course list |
 | POST `/courses` | Staff | `{code,name,description,credits?}` |
 | POST `/courses/{id}/enroll` | Student | Enroll; duplicate returns 409 |
@@ -38,6 +42,7 @@ Base URL: `http://127.0.0.1:5000/api`. JSON requests use `Content-Type: applicat
 | GET `/announcements` | Signed in | Updates for the user's courses; admin can review all |
 | POST `/courses/{id}/announcements` | Course staff | `{title,body}`; notifies enrolled students |
 | GET `/analytics/overview` | Staff | Per-course enrollment, submission, late and grade metrics |
+| GET `/exports/submissions.csv` | Staff | CSV export for submissions in the staff member's own courses |
 | GET `/admin/staff` | Admin | Staff account list |
 | POST `/admin/staff` | Admin | Provision staff account with a temporary password |
 | PATCH `/admin/staff/{id}` | Admin | Activate or suspend a staff account |

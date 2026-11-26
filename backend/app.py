@@ -5,6 +5,12 @@ import calendar
 import json
 import hmac
 import hashlib
+import csv
+import io
+import smtplib
+import ssl
+import zipfile
+from email.message import EmailMessage
 from datetime import datetime, timedelta, timezone
 from functools import wraps
 from pathlib import Path
@@ -16,6 +22,7 @@ from flask_jwt_extended import JWTManager, create_access_token, get_jwt_identity
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from werkzeug.security import check_password_hash, generate_password_hash
+from itsdangerous import BadSignature, SignatureExpired, URLSafeTimedSerializer
 
 from database import db, initialize_database
 from models import ActivityLog, Announcement, AuthFailure, Course, Deadline, Enrollment, Notification, PersonalTask, Project, ProjectDeadline, ProjectFile, ReminderLog, Submission, SubmissionAttempt, TaskCompletion, TaskSubtask, User
@@ -250,6 +257,160 @@ def create_app():
     def logout():
         user = current_user(); audit(user.id, "logout", "user", user.id); db.session.commit()
         return jsonify(message="signed out")
+
+    def deliver_password_reset(email, token):
+        host = os.getenv("SMTP_HOST")
+        sender = os.getenv("SMTP_FROM")
+        if not host or not sender:
+            return False
+        base_url = os.getenv("APP_PUBLIC_URL") or request.host_url.rstrip("/")
+        message = EmailMessage()
+        message["Subject"] = "Reset your DeadlineOS password"
+        message["From"] = sender
+        message["To"] = email
+        message.set_content(f"Use this link within 30 minutes to reset your DeadlineOS password:\n\n{base_url}/reset-password.html?token={token}\n\nIf you did not request this, ignore this message.")
+        port = int(os.getenv("SMTP_PORT", "587"))
+        if os.getenv("SMTP_USE_SSL", "false").lower() == "true":
+            with smtplib.SMTP_SSL(host, port, context=ssl.create_default_context(), timeout=15) as client:
+                if os.getenv("SMTP_USERNAME"): client.login(os.getenv("SMTP_USERNAME"), os.getenv("SMTP_PASSWORD", ""))
+                client.send_message(message)
+        else:
+            with smtplib.SMTP(host, port, timeout=15) as client:
+                client.starttls(context=ssl.create_default_context())
+                if os.getenv("SMTP_USERNAME"): client.login(os.getenv("SMTP_USERNAME"), os.getenv("SMTP_PASSWORD", ""))
+                client.send_message(message)
+        return True
+
+    @app.post("/api/auth/password-reset/request")
+    def request_password_reset():
+        email = str((request.get_json(silent=True) or {}).get("email", "")).strip().lower()[:254]
+        # Do not reveal whether an account exists. Require mail configuration before issuing links.
+        if not os.getenv("SMTP_HOST") or not os.getenv("SMTP_FROM") or (environment == "production" and not os.getenv("APP_PUBLIC_URL")):
+            return jsonify(error="Password recovery is not configured. Contact an administrator."), 503
+        now = datetime.now(timezone.utc); cutoff = now - timedelta(minutes=app.config["LOGIN_WINDOW_MINUTES"])
+        ip_hash = rate_key("ip", request.remote_addr or "unknown")
+        email_hash = rate_key("email", email)
+        attempts = AuthFailure.query.filter(AuthFailure.ip_hash == ip_hash, AuthFailure.occurred_at >= cutoff).count()
+        if attempts >= min(5, app.config["LOGIN_IP_FAILURE_LIMIT"]):
+            response = jsonify(error="too many recovery requests; wait before trying again")
+            response.headers["Retry-After"] = str(app.config["LOGIN_WINDOW_MINUTES"] * 60)
+            return response, 429
+        AuthFailure.query.filter(AuthFailure.occurred_at < now - timedelta(days=1)).delete(synchronize_session=False)
+        db.session.add(AuthFailure(ip_hash=ip_hash, email_hash=email_hash, occurred_at=now))
+        user = User.query.filter_by(email=email, is_active=True).first() if email else None
+        if user:
+            serializer = URLSafeTimedSerializer(app.config["JWT_SECRET_KEY"], salt="deadlineos-password-reset")
+            token = serializer.dumps({"id": user.id, "version": user.password_hash[-16:]})
+            try:
+                deliver_password_reset(user.email, token)
+            except Exception:
+                app.logger.exception("Password reset email delivery failed")
+        db.session.commit()
+        return jsonify(message="If an active account matches that email, a recovery link has been sent.")
+
+    @app.post("/api/auth/password-reset/confirm")
+    def confirm_password_reset():
+        data = request.get_json(silent=True) or {}; token = str(data.get("token", "")); password = str(data.get("password", ""))
+        if len(password) < 12 or len(password) > 256: return jsonify(error="password must be at least 12 characters"), 400
+        serializer = URLSafeTimedSerializer(app.config["JWT_SECRET_KEY"], salt="deadlineos-password-reset")
+        try:
+            payload = serializer.loads(token, max_age=1800)
+            user = db.session.get(User, int(payload.get("id", 0)))
+        except (BadSignature, SignatureExpired, TypeError, ValueError):
+            user = None; payload = {}
+        if not user or not user.is_active or payload.get("version") != user.password_hash[-16:]:
+            return jsonify(error="This recovery link is invalid or expired. Request a new one."), 400
+        user.password_hash = generate_password_hash(password)
+        audit(user.id, "password_reset", "user", user.id); db.session.commit()
+        return jsonify(message="Password updated. You can now sign in.")
+
+    @app.get("/api/account/export")
+    @roles("student")
+    def export_student_data():
+        user = current_user()
+        enrollments = Enrollment.query.filter_by(user_id=user.id).all()
+        tasks = PersonalTask.query.filter_by(user_id=user.id).all()
+        projects = Project.query.filter_by(user_id=user.id).all()
+        submissions = Submission.query.filter_by(user_id=user.id).all()
+        project_files = ProjectFile.query.join(Project).filter(Project.user_id == user.id).all()
+        attempts = SubmissionAttempt.query.join(Submission).filter(Submission.user_id == user.id).all()
+        project_deadlines = ProjectDeadline.query.filter_by(user_id=user.id).all()
+        def iso(value): return value.isoformat() if value else None
+        def submission_data(item):
+            deadline = db.session.get(Deadline, item.deadline_id)
+            course = db.session.get(Course, deadline.course_id) if deadline else None
+            return {"course_code": course.code if course else None, "assignment": deadline.title if deadline else None, "due_at": iso(deadline.due_at) if deadline else None,
+                    "submitted_at": iso(item.submitted_at), "note": item.note, "file_name": item.file_name, "status": item.status,
+                    "marks_obtained": item.marks_obtained, "feedback": item.feedback,
+                    "attempts": [{"attempt_number": a.attempt_number, "submitted_at": iso(a.submitted_at), "note": a.note, "file_name": a.file_name, "status": a.status} for a in attempts if a.submission_id == item.id]}
+        def project_data(item):
+            links = []
+            for link in project_deadlines:
+                if link.project_id != item.id: continue
+                deadline = db.session.get(Deadline, link.deadline_id)
+                course = db.session.get(Course, deadline.course_id) if deadline else None
+                links.append({"course_code": course.code if course else None, "assignment": deadline.title if deadline else None, "due_at": iso(deadline.due_at) if deadline else None})
+            return {"name": item.name, "description": item.description, "is_archived": item.is_archived,
+                    "files": [{"file_name": f.file_name, "uploaded_at": iso(f.uploaded_at)} for f in project_files if f.project_id == item.id], "linked_deadlines": links}
+        data = {
+            "account": {"email": user.email, "first_name": user.first_name, "last_name": user.last_name, "role": user.role, "created_at": iso(user.created_at)},
+            "enrollments": [{"course_code": (db.session.get(Course, item.course_id).code if db.session.get(Course, item.course_id) else None), "course_name": (db.session.get(Course, item.course_id).name if db.session.get(Course, item.course_id) else None), "status": item.status, "enrolled_at": iso(item.enrolled_at)} for item in enrollments],
+            "tasks": [{"title": item.title, "description": item.description, "due_at": iso(item.due_at), "priority": item.priority, "recurrence": item.recurrence, "is_complete": item.is_complete, "is_archived": item.is_archived, "subtasks": [{"title": s.title, "is_complete": s.is_complete} for s in TaskSubtask.query.filter_by(task_id=item.id).all()]} for item in tasks],
+            "task_completion_events": [{"completed_at": iso(item.completed_at)} for item in TaskCompletion.query.filter_by(user_id=user.id).all()],
+            "projects": [project_data(item) for item in projects],
+            "submissions": [submission_data(item) for item in submissions],
+            "notifications": [{"message": item.message, "kind": item.kind, "is_read": item.is_read, "created_at": iso(item.created_at)} for item in Notification.query.filter_by(user_id=user.id).all()],
+            "activity": [{"action": item.action, "entity_type": item.entity_type, "entity_id": item.entity_id, "occurred_at": iso(item.occurred_at)} for item in ActivityLog.query.filter_by(user_id=user.id).order_by(ActivityLog.occurred_at).all()],
+        }
+        archive = io.BytesIO()
+        upload_dir = Path(app.instance_path) / "uploads"
+        with zipfile.ZipFile(archive, "w", zipfile.ZIP_DEFLATED) as bundle:
+            bundle.writestr("account-data.json", json.dumps(data, indent=2, ensure_ascii=False))
+            keys = {f.file_key for f in project_files}
+            keys.update(a.file_key for a in attempts if a.file_key)
+            keys.update(s.file_key for s in submissions if s.file_key)
+            for key in keys:
+                path = upload_dir / Path(key).name
+                if path.is_file(): bundle.write(path, f"uploads/{path.name}")
+        archive.seek(0)
+        return send_file(archive, mimetype="application/zip", as_attachment=True, download_name="deadlineos-account-export.zip")
+
+    @app.delete("/api/account")
+    @roles("student")
+    def delete_student_account():
+        user = current_user(); data = request.get_json(silent=True) or {}
+        if data.get("confirmation") != "DELETE" or not check_password_hash(user.password_hash, str(data.get("password", ""))):
+            return jsonify(error="enter your current password and type DELETE to confirm"), 400
+        project_files = ProjectFile.query.join(Project).filter(Project.user_id == user.id).all()
+        submissions = Submission.query.filter_by(user_id=user.id).all()
+        attempts = SubmissionAttempt.query.join(Submission).filter(Submission.user_id == user.id).all()
+        file_keys = {item.file_key for item in project_files}
+        file_keys.update(item.file_key for item in submissions if item.file_key)
+        file_keys.update(item.file_key for item in attempts if item.file_key)
+        # Explicit cleanup is required because SQLite does not enable FK cascades by default.
+        for submission in submissions:
+            SubmissionAttempt.query.filter_by(submission_id=submission.id).delete(synchronize_session=False)
+        task_ids = [row.id for row in PersonalTask.query.filter_by(user_id=user.id).all()]
+        for task_id in task_ids:
+            TaskSubtask.query.filter_by(task_id=task_id).delete(synchronize_session=False)
+            TaskCompletion.query.filter_by(task_id=task_id).delete(synchronize_session=False)
+        project_ids = [item.id for item in Project.query.filter_by(user_id=user.id).all()]
+        ProjectFile.query.filter(ProjectFile.project_id.in_(project_ids)).delete(synchronize_session=False)
+        ProjectDeadline.query.filter_by(user_id=user.id).delete(synchronize_session=False)
+        Submission.query.filter_by(user_id=user.id).delete(synchronize_session=False)
+        Enrollment.query.filter_by(user_id=user.id).delete(synchronize_session=False)
+        PersonalTask.query.filter_by(user_id=user.id).delete(synchronize_session=False)
+        ReminderLog.query.filter_by(user_id=user.id).delete(synchronize_session=False)
+        Notification.query.filter_by(user_id=user.id).delete(synchronize_session=False)
+        ActivityLog.query.filter_by(user_id=user.id).delete(synchronize_session=False)
+        AuthFailure.query.filter_by(email_hash=rate_key("email", user.email)).delete(synchronize_session=False)
+        Project.query.filter_by(user_id=user.id).delete(synchronize_session=False)
+        db.session.delete(user); db.session.commit()
+        for key in file_keys:
+            path = Path(app.instance_path) / "uploads" / Path(key).name
+            try: path.unlink(missing_ok=True)
+            except OSError: app.logger.exception("Could not remove an uploaded file after account deletion")
+        return jsonify(message="Your account and associated data were deleted.")
 
     @app.get("/api/courses")
     @jwt_required()
@@ -763,6 +924,24 @@ def create_app():
                                       "average_mark":round(sum(marks)/len(marks),1) if marks else None})
             result.append({"id":course.id,"code":course.code,"name":course.name,"enrolled":enrolled,"deadlines":deadline_data})
         return jsonify(courses=result)
+
+    @app.get("/api/exports/submissions.csv")
+    @roles("staff")
+    def export_submissions_csv():
+        user = current_user()
+        rows = db.session.query(Submission, Deadline, Course, User).join(Deadline, Submission.deadline_id == Deadline.id).join(Course, Deadline.course_id == Course.id).join(User, Submission.user_id == User.id).filter(Course.staff_id == user.id).order_by(Course.code, Deadline.due_at, User.email).all()
+        output = io.StringIO(newline="")
+        writer = csv.writer(output)
+        writer.writerow(["course_code", "course_name", "assignment", "due_at", "student_email", "student_name", "submitted_at", "status", "attempt_count", "marks_obtained", "max_marks", "feedback", "file_name"])
+        def csv_safe(value):
+            value = "" if value is None else str(value)
+            return "'" + value if value.lstrip(" \t\r\n").startswith(("=", "+", "-", "@")) else value
+        for submission, deadline, course, student in rows:
+            writer.writerow([csv_safe(course.code), csv_safe(course.name), csv_safe(deadline.title), as_utc(deadline.due_at).isoformat(), csv_safe(student.email), csv_safe(f"{student.first_name} {student.last_name}"), as_utc(submission.submitted_at).isoformat(), submission.status, submission.attempt_count, submission.marks_obtained if submission.marks_obtained is not None else "", deadline.max_marks, csv_safe(submission.feedback), csv_safe(submission.file_name)])
+        response = app.response_class("\ufeff" + output.getvalue(), mimetype="text/csv; charset=utf-8")
+        response.headers["Content-Disposition"] = "attachment; filename=deadlineos-submissions.csv"
+        response.headers["Cache-Control"] = "no-store"
+        return response
 
     @app.get("/api/admin/staff")
     @roles("admin")

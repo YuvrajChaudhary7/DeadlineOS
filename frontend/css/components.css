@@ -33,6 +33,7 @@
 @media(max-width:760px){.quick-capture{grid-template-columns:1fr}.quick-capture>small{grid-column:1}.planner-summary{grid-template-columns:1fr}.briefing-row{grid-template-columns:1fr auto;gap:3px 10px}.briefing-row strong{grid-column:1/-1;grid-row:2}.suggestion-row{align-items:flex-start;flex-direction:column}.suggestion-row .button{width:100%}}
 @media(prefers-reduced-motion:reduce){*,*::before,*::after{scroll-behavior:auto!important;transition:none!important;animation:none!important}}
 :focus-visible{outline:3px solid #105a42;outline-offset:3px}
+.danger-zone{margin-top:24px;border-color:#e7c8c4}.danger-zone h2{color:#8e3029}.danger-button{background:#9c3832}.danger-button:hover{background:#762923}
 button:disabled{opacity:.55;cursor:not-allowed;transform:none;box-shadow:none}
 .resubmission-toggle{display:flex;align-items:center;gap:9px}.resubmission-toggle input{width:auto}
 .deadline-edit{margin-top:14px;border-top:1px solid var(--line);padding-top:10px;font-size:13px}
