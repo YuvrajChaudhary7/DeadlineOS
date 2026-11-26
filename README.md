@@ -9,8 +9,21 @@ DeadlineOS is a student and staff deadline management app built as a two-person 
 ## Run locally (Windows)
 
 1. Install Python 3.10 or later.
-2. Double-click `run.bat`.
-3. Open `http://127.0.0.1:5000/api/health` to verify the API.
+2. Start the app from the project folder. If PowerShell is currently in the parent folder that contains `DeadlineOS`, run:
+
+   ```powershell
+   .\DeadlineOS\run.bat
+   ```
+
+   Or enter the project folder first, then run the launcher:
+
+   ```powershell
+   cd .\DeadlineOS
+   .\run.bat
+   ```
+
+   You can also double-click `run.bat` from inside the `DeadlineOS` folder.
+3. Keep the terminal window open while the app is running. Open `http://127.0.0.1:5000/` for the app, or `http://127.0.0.1:5000/api/health` to verify the API. Press **Ctrl+C** in the terminal to stop it.
 
 The app includes student and instructor flows for course enrollment, editable/closable assignments, policy-bounded resubmission history, private file submission, grading, feedback, announcements and staff activity review. Students have private project workspaces for personal tasks, linked course dates and files; a task planner with subtasks, recurring tasks, archive history and a private consistency streak; and a combined heatmap calendar with daily briefing, explainable risk estimates and optional workload rescheduling suggestions. Quick capture parses a limited set of date phrases locally in the browser and does not send task text to an AI service. Staff analytics and admin-managed staff accounts are included. Demo login (local only): `staff@university.edu` / `StaffPass123!` or `alice@university.edu` / `StudentPass123!`. Demo seeding is enabled by default. Set `SEED_DEMO=false` for non-demo use. Replace the development JWT key before deployment. Local assignment and project files are stored under Flask's instance directory.
 
